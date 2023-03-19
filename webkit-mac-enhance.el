@@ -1,14 +1,13 @@
-;;; webkit-mac-enhance.el --- fixes and functionalities for xwidget-webkit -*- lexical-binding: t; -*-
+;;; webkit-mac-enhance.el --- Fixes and functionalities for xwidget-webkit -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2022  Andrew De Angelis
 
 ;; Author: Andrew De Angelis <bobodeangelis@gmail.com>
 ;; Maintainer: Andrew De Angelis <bobodeangelis@gmail.com>
-;; TODO: fix the url
-;; URL: https://github.com/andyjda/sticky-shell
-;; Version: 1.0.1
-;; Package-Requires: ((emacs "24.1"))
-;; Keywords: processes, terminals, tools
+;; URL: https://github.com/andyjda/webkit-mac-enhance
+;; Version: 0.0.1
+;; Package-Requires: ((emacs "25.1"))
+;; Keywords: comm
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License Version 3,
@@ -34,15 +33,15 @@
 ;; On MacOS, the xwidget-webkit feature is functional, but a couple of features
 ;; lag behind the Linux distribution: mainly the History and Search features.
 ;; This package provides a temporary fix at the Emacs-Lisp layer: by implementing
-;; a separate "Web History" component, keeping track of visited website
+;; a separate "Web History" component, keeping track of visited websites
 ;; within a csv file, and by reverting the "Search" feature to an earlier, simpler
 ;; implementation that allows us to search within a web page.
 ;;
 ;; A couple small additional features are provided:
 ;; 1) the ability to easily switch between
-;; a "eww" and a "webkit" view of the same page. The intended use-case is
+;; an "eww" and a "webkit" view of the same page.  The intended use-case is
 ;; situations where the user needs to navigate and manipulate a lot of text:
-;; in these cases, the xwidget-webkit view can be hard to use, whereas the
+;; in these cases, the xwidget-webkit view can be annoying, whereas the
 ;; eww view allows us to use all our Emacs keybindings.
 ;; 2) the `websearch' function, allowing users to quickly open a webkit page
 ;; querying their specified `default-search-engine'
@@ -63,6 +62,7 @@
   :group 'widgets)
 
 (declare-function eww-current-url "eww.el")
+(declare-function xwidget-webkit-current-url "xwidget.el")
 (declare-function xwidget-webkit-current-session "xwidget.el")
 (declare-function xwidget-webkit-buffer-kill "xwidget.el")
 (declare-function xwidget-webkit-bookmark-make-record "xwidget.el")
@@ -70,7 +70,9 @@
 
 ;;; web search
 (defcustom default-search-engine "duckduckgo.com"
-  "The default search engine to use when browsing with xwidget-webkit")
+  "The default search engine to use when browsing with xwidget-webkit"
+  :group 'webkit-mac-enhance
+  :type 'string)
 ;; (defcustom default-search-engine "search.brave.com"
 ;;   "The default search engine to use when browsing with xwidget-webkit")
 
@@ -102,7 +104,7 @@ with the resulting url, and the optional NEW-SESSION argument"
 This assumes that an xwidget session is currently open.
 If it's not, `my-current-url' throws an error"
   (interactive)
-  (eww-browse-url (my-current-url)))
+  (eww-browse-url (xwidget-webkit-current-url)))
 
 (defun my-xwidget-browse (&optional new-session)
   "From a `eww' session, open an xwidget session with the current url.
@@ -116,21 +118,35 @@ Use `xwidget-webkit-browse-url' with `eww-current-url' and NEW-SESSION"
 	      (define-key eww-mode-map "x" #'my-xwidget-browse)))
 
 ;;; web history
-(defcustom web-history-file "~/.emacs.d/custom/datasets/web_history.csv"
-  "Where to store our xwidget-webkit browsing history")
+(defcustom web-history-file (concat user-emacs-directory "custom/web_history.csv")
+  "Where to store our xwidget-webkit browsing history."
+  :group 'webkit-mac-enhance
+  :type 'string)
+
 (defcustom web-history-file-header "day,time,title,url\n"
-  "First row in our xwidget-webkit browsing history")
+  "First row in our xwidget-webkit browsing history."
+  :group 'webkit-mac-enhance
+  :type 'string)
+
 (defcustom web-history-file-session-separator
   "__________,__________,__________,__________\n"
-  "Line that separates sessions in our xwidget-webkit browsing history")
+  "Line that separates sessions in our xwidget-webkit browsing history."
+  :group 'webkit-mac-enhance
+  :type 'string)
+
 (defcustom web-history-amt-days 60
   "Integer corresponding to the amount of days recorded in `web-history-file'.
-Entries that are older than the current date minus this amount will be deleted")
+Entries that are older than the current date minus this amount will be deleted"
+  :group 'webkit-mac-enhance
+  :type 'integer)
 
 ;; TODO: need to figure out how to add a page only once per session
-(defun webkit-add-current-url-to-history (the-message title)
+(defun webkit-add-current-url-to-history (msg title)
   "Get the current url and add it to `web-history-file'.
-Also add date, time, and widget title (which is ARG)"
+Also add date, time, and xwidget TITLE.
+To check whether the current url should be added to the history file,
+this function is added as advice to xwidget-log.  When the MSG we are logging
+tells us that webkit finished loading, we add the url to the file"
   ;; only add to history once load is finished
   (when
       ;; TODO: figure out why we call xwidget-log when the length of title > 0
@@ -138,7 +154,7 @@ Also add date, time, and widget title (which is ARG)"
       ;; and log "webkit finished loading" twice
       (and (string-equal (nth 3 last-input-event)
                          "load-finished")
-           (equal the-message "webkit finished loading: %s"))
+           (equal msg "webkit finished loading: %s"))
     (with-temp-file web-history-file
       (if (file-exists-p web-history-file)
 	  (insert-file-contents-literally web-history-file)
@@ -158,10 +174,11 @@ Also add date, time, and widget title (which is ARG)"
 
 (defun webkit-history-add-session-separator (&rest _args)
   "Insert `web-history-file-session-separator' in `web-history-file'.
-  This helps visualize different sessions in the csv file.
+This helps visualize different sessions in the csv file.
   _ARGS are ignored, but included in the definition so that this
   function can be added as advice before `xwidget-webkit-new-session'.
-  Side effect: delete old entries by calling `webkit-history-clear-older-entries'"
+  Side effect: delete old entries,
+by calling `webkit-history-clear-older-entries'"
   (with-temp-file web-history-file
     (if (file-exists-p web-history-file)
 	(insert-file-contents-literally web-history-file)
@@ -213,7 +230,7 @@ Also add date, time, and widget title (which is ARG)"
 
 (defun web-history-open-url (arg)
   "If called when point is at a link, open that url.
-  Else, parse the line at point to find the link, prompt for confirmation,
+Else, parse the line at point to find the link, prompt for confirmation,
   and open it.  Prefix ARG is used when calling `xwidget-webkit-browse-url',
   as the value of NEW-SESSION"
   (interactive "P")
@@ -237,7 +254,6 @@ Also add date, time, and widget title (which is ARG)"
 (defvar web-history-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-<return>") #'web-history-open-url)
-    (define-key map (kbd "C-c o") #'web-history-open-url)
     (define-key map (kbd "C-c C-o") #'web-history-open-url)
     (define-key map (kbd "<mouse-3>") #'web-history-mouse-open-url)
     map))
@@ -245,7 +261,7 @@ Also add date, time, and widget title (which is ARG)"
 ;;;###autoload
 (define-derived-mode web-history-mode csv-mode "web-history"
   "Major mode for displaying web history.
-  \\{web-history-mode-map}"
+\\{web-history-mode-map}"
   (setq font-lock-defaults '(web-history-highlights))
   (setq-local buffer-read-only t)
   (setq-local comment-start nil)
@@ -313,8 +329,7 @@ Also add date, time, and widget title (which is ARG)"
       ;; Unconditionally avoid 'Failing I-search ...'
       (if (eq isearch-forward nil)
           (goto-char (point-max))
-        (goto-char (point-min)))
-      )))
+        (goto-char (point-min))))))
 
 ;;; xwidget configuration
 ;; adding our patches to the mode definition
@@ -323,7 +338,6 @@ Also add date, time, and widget title (which is ARG)"
 This overrides the original definition in xwidget.el.
 Because it tried to call the undefined function
 `xwidget-webkit-estimated-load-progress'."
-  (define-key xwidget-webkit-mode-map "w" #'my-current-url)
   (define-key xwidget-webkit-mode-map "s" #'websearch)
   (define-key xwidget-webkit-mode-map "t" #'eww-this)
   (define-key xwidget-webkit-mode-map "H" #'webkit-mac-enhance-display-web-history)
