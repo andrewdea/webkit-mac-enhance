@@ -1,0 +1,10 @@
+# Mac OS
+.DS_Store
+
+# IDE - Emacs
+*~
+\#*\#
+*.dir-locals.el
+
+# personal
+my-thing.el
