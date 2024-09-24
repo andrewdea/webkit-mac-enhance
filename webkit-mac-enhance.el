@@ -331,6 +331,9 @@ Else, parse the line at point to find the link, prompt for confirmation,
           (goto-char (point-max))
         (goto-char (point-min))))))
 
+(defalias #'xw-url #'xwidget-webkit-browse-url)
+(defalias #'xw-history #'xwidget-webkit-browse-history)
+
 ;;; xwidget configuration
 ;; adding our patches to the mode definition
 (defun my-xwidget-webkit-fix-configuration ()
